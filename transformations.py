@@ -68,9 +68,42 @@ class SimpleTransformer(AbstractTransformer):
     def _create_transformation_list(self):
         transformation_list = []
         for is_flip, k_rotate in itertools.product((False, True),
-                                                    range(4)):
+                                                   range(4)):
             transformation = AffineTransformation(is_flip, 0, 0, k_rotate)
             transformation_list.append(transformation)
 
         self._transformation_list = transformation_list
 
+
+class TabularTransformer(object):
+    def __init__(self, n_transforms=4):
+        self.n_transforms = n_transforms
+
+    def transform_batch(self, x_batch, t_inds):
+        """
+        Applies tabular corruptions: Identity, Noise, Swap, Mask.
+        """
+        x_out = x_batch.copy()
+
+        for i, t_type in enumerate(t_inds):
+            # 0: Identity (Original)
+            if t_type == 0:
+                continue
+
+            # 1: Add Gaussian Noise
+            elif t_type == 1:
+                noise = np.random.normal(0, 0.02, size=x_out[i].shape)
+                x_out[i] += noise
+
+            # 2: Swap two features
+            elif t_type == 2:
+                if len(x_out[i]) > 1:
+                    idx1, idx2 = np.random.choice(len(x_out[i]), 2, replace=False)
+                    x_out[i][idx1], x_out[i][idx2] = x_out[i][idx2], x_out[i][idx1]
+
+            # 3: Mask (set feature to 0)
+            elif t_type == 3:
+                idx = np.random.randint(len(x_out[i]))
+                x_out[i][idx] = 0.0
+
+        return x_out

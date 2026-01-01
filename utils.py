@@ -2,7 +2,10 @@ from glob import glob
 import os
 import numpy as np
 import cv2
+import pandas as pd  # NEU: Für CSV-Dateien
 from sklearn.metrics import roc_curve, precision_recall_curve, auc
+from sklearn.model_selection import train_test_split  # NEU: Für Split
+from sklearn.preprocessing import StandardScaler  # NEU: Für Skalierung
 from keras.datasets import mnist, fashion_mnist, cifar100, cifar10
 from keras.backend import cast_to_floatx
 
@@ -21,13 +24,13 @@ def resize_and_crop_image(input_file, output_side_length, greyscale=False):
     height_offset = (new_height - output_side_length) // 2
     width_offset = (new_width - output_side_length) // 2
     cropped_img = resized_img[height_offset:height_offset + output_side_length,
-                              width_offset:width_offset + output_side_length]
+    width_offset:width_offset + output_side_length]
     assert cropped_img.shape[:2] == (output_side_length, output_side_length)
     return cropped_img
 
 
 def normalize_minus1_1(data):
-    return 2*(data/255.) - 1
+    return 2 * (data / 255.) - 1
 
 
 def get_channels_axis():
@@ -70,6 +73,40 @@ def load_cifar100(label_mode='coarse'):
     X_test = normalize_minus1_1(cast_to_floatx(X_test))
     return (X_train, y_train), (X_test, y_test)
 
+
+def load_creditcard():
+    filepath = 'data/creditcard.csv'
+    print(f"Loading and processing {filepath}...")
+
+    # 1. Load CSV
+    df = pd.read_csv(filepath)
+
+    # 2. Cyclic Time Encoding
+    df['datetime'] = pd.to_datetime('2022-01-01') + pd.to_timedelta(df['Time'], unit='s')
+    hours = df['datetime'].dt.hour
+    df['time_vector_x'] = np.sin(2 * np.pi * hours / 24)
+    df['time_vector_y'] = np.cos(2 * np.pi * hours / 24)
+
+    # Delete old time cloumn
+    df = df.drop(['Time', 'datetime'], axis=1)
+
+    # 3. Scale amount
+    df['Amount'] = StandardScaler().fit_transform(df['Amount'].values.reshape(-1, 1))
+
+    # 4. Split Features and Labels
+    y = df['Class'].values
+    x = df.drop(['Class'], axis=1).values
+
+    # 5. Split Train/Test (80/20)
+    x_train, x_test, y_train, y_test = train_test_split(
+        x, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    y_train = y_train.reshape(-1, 1)
+    y_test = y_test.reshape(-1, 1)
+
+    print(f"Data ready. Input shape: {x_train.shape}")
+    return (x_train, y_train), (x_test, y_test)
 
 def save_roc_pr_curve_data(scores, labels, file_path):
     scores = scores.flatten()
@@ -142,6 +179,7 @@ def get_class_name_from_index(index, dataset_name):
         'fashion-mnist': ('t-shirt', 'trouser', 'pullover', 'dress', 'coat', 'sandal', 'shirt', 'sneaker', 'bag',
                           'ankle-boot'),
         'cats-vs-dogs': ('cat', 'dog'),
+        'creditcard': ('Normal', 'Fraud')
     }
 
     return ind_to_name[dataset_name][index]

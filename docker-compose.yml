@@ -1,0 +1,7 @@
+services:
+  tf18:
+    image: tf18-keras220:latest
+    platform: linux/amd64
+    working_dir: /work
+    volumes:
+      - .:/work

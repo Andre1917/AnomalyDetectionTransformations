@@ -1,0 +1,29 @@
+FROM python:3.6-buster
+
+# === FIX FÜR ALTES DEBIAN BUSTER ===
+# Da Debian Buster EOL ist, müssen wir auf die Archiv-Server wechseln,
+# sonst schlägt apt-get update mit 404 fehl.
+RUN echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list && \
+    apt-get update --allow-releaseinfo-change || true
+
+# 1. System-Abhängigkeiten installieren
+RUN apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Pip Upgrade
+RUN pip install -U pip
+
+# 3. Pakete installieren
+RUN pip install \
+    h5py==2.10.0 \
+    keras==2.2.0 \
+    tensorflow==1.8.0 \
+    scikit-learn==0.19.1 \
+    pandas==0.23.4 \
+    opencv-python==4.2.0.32 \
+    matplotlib==3.3.4
+
+WORKDIR /work
