@@ -119,20 +119,17 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
     gpu_q.put(gpu_to_use)
 
 
-# --- 2. BENCHMARK: Isolation Forest (NEW) ---
+def _train_if_and_score(params, xtrain, test_labels, xtest):
+    clf = IsolationForest(**params, n_jobs=1, random_state=42).fit(xtrain)
+    return roc_auc_score(test_labels, -clf.decision_function(xtest))
+
 def _isolation_forest_experiment(dataset_load_fn, dataset_name, single_class_ind):
     (x_train, y_train), (x_test, y_test) = dataset_load_fn()
     x_train = x_train.reshape((len(x_train), -1))
     x_test = x_test.reshape((len(x_test), -1))
     x_train_task = x_train[y_train.flatten() == single_class_ind]
 
-    # Parameter Grid for Isolation Forest
     pg = ParameterGrid({'contamination': [0.01, 0.05, 0.1], 'n_estimators': [100]})
-
-    def _train_if_and_score(params, xtrain, test_labels, xtest):
-        clf = IsolationForest(**params, n_jobs=1, random_state=42).fit(xtrain)
-        # Invert score: High IF score = Normal, we need High = Anomaly for AUC calculation
-        return roc_auc_score(test_labels, -clf.decision_function(xtest))
 
     results = Parallel(n_jobs=4)(
         delayed(_train_if_and_score)(d, x_train_task, y_test.flatten() == single_class_ind, x_test)
@@ -150,7 +147,6 @@ def _isolation_forest_experiment(dataset_load_fn, dataset_name, single_class_ind
                                                            get_class_name_from_index(single_class_ind, dataset_name),
                                                            datetime.now().strftime('%Y-%m-%d-%H%M'))
     save_roc_pr_curve_data(scores, labels, os.path.join(res_dir, res_file_name))
-
 
 # --- 3. BENCHMARK: Autoencoder (NEW - for Tabular) ---
 def _tabular_autoencoder_experiment(dataset_load_fn, dataset_name, single_class_ind, gpu_q):
