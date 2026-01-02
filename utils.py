@@ -82,15 +82,18 @@ def load_creditcard():
     df = pd.read_csv(filepath)
 
     # 2. Cyclic Time Encoding
-    df['datetime'] = pd.to_datetime('2022-01-01') + pd.to_timedelta(df['Time'], unit='s')
-    hours = df['datetime'].dt.hour
-    df['time_vector_x'] = np.sin(2 * np.pi * hours / 24)
-    df['time_vector_y'] = np.cos(2 * np.pi * hours / 24)
+    # 24 * 60 * 60 = 86400 seconds in a day
+    seconds_in_day = 24 * 60 * 60
+    df['Time_Day'] = df['Time'] % seconds_in_day
 
-    # Delete old time cloumn
-    df = df.drop(['Time', 'datetime'], axis=1)
+    # Sinus/Cosinus Transformation
+    df['time_vector_x'] = np.sin(2 * np.pi * df['Time_Day'] / seconds_in_day)
+    df['time_vector_y'] = np.cos(2 * np.pi * df['Time_Day'] / seconds_in_day)
 
-    # 3. Scale amount
+    # Delete old time columns
+    df = df.drop(['Time', 'Time_Day'], axis=1)
+
+    df['Amount'] = np.log1p(df['Amount'])
     df['Amount'] = StandardScaler().fit_transform(df['Amount'].values.reshape(-1, 1))
 
     # 4. Split Features and Labels

@@ -81,7 +81,10 @@ class TabularTransformer(object):
 
     def transform_batch(self, x_batch, t_inds):
         """
-        Applies tabular corruptions: Identity, Noise, Swap, Mask.
+        Applies tabular corruptions.
+        Supported:
+        0: Identity, 1: Noise, 2: Swap, 3: Mask
+        4: Scale, 5: Negation, 6: Shift, 7: Shuffle
         """
         x_out = x_batch.copy()
 
@@ -105,5 +108,23 @@ class TabularTransformer(object):
             elif t_type == 3:
                 idx = np.random.randint(len(x_out[i]))
                 x_out[i][idx] = 0.0
+
+            # 4: Scale
+            elif t_type == 4:
+                scale = np.random.uniform(0.5, 1.5)
+                x_out[i] *= scale
+
+            # 5: Negation
+            elif t_type == 5:
+                x_out[i] = -x_out[i]
+
+            # 6: Shift
+            elif t_type == 6:
+                shift = np.random.normal(0, 0.1)
+                x_out[i] += shift
+
+            # 7: Shuffle
+            elif t_type == 7:
+                np.random.shuffle(x_out[i])
 
         return x_out

@@ -41,7 +41,7 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
 
     if is_tabular:
         # Use TabularTransformer and MLP for financial data
-        transformer = TabularTransformer(n_transforms=4)
+        transformer = TabularTransformer(n_transforms=8)
         mdl = create_mlp(input_dim=x_train.shape[1], n_classes=transformer.n_transforms)
     else:
         # Use Image Transformer and Wide ResNet for images
