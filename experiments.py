@@ -65,12 +65,15 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
     mdl.fit(x=x_train_task_transformed, y=to_categorical(transformations_inds),
             batch_size=batch_size, epochs=int(np.ceil(200 / transformer.n_transforms)))
 
-    # --- Normality Scoring Logic (Dirichlet) ---
+    EPSILON = 1e-15
+
     def calc_approx_alpha_sum(observations):
         N = len(observations)
         f = np.mean(observations, axis=0)
+        f = np.clip(f, EPSILON, 1 - EPSILON)
+        obs_safe = np.clip(observations, EPSILON, 1 - EPSILON)
         return (N * (len(f) - 1) * (-psi(1))) / (
-                N * np.sum(f * np.log(f)) - np.sum(f * np.sum(np.log(observations), axis=0)))
+                N * np.sum(f * np.log(f)) - np.sum(f * np.sum(np.log(obs_safe), axis=0)))
 
     def inv_psi(y, iters=5):
         cond = y >= -2.22
@@ -89,23 +92,35 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
         return alpha_new
 
     def dirichlet_normality_score(alpha, p):
-        return np.sum((alpha - 1) * np.log(p), axis=-1)
+        p_safe = np.clip(p, EPSILON, 1 - EPSILON)
+        return np.sum((alpha - 1) * np.log(p_safe), axis=-1)
 
     scores = np.zeros((len(x_test),))
     observed_data = x_train_task
     for t_ind in range(transformer.n_transforms):
         observed_dirichlet = mdl.predict(transformer.transform_batch(observed_data, [t_ind] * len(observed_data)),
                                          batch_size=1024)
+        observed_dirichlet = np.clip(observed_dirichlet, EPSILON, 1 - EPSILON)
+
         log_p_hat_train = np.log(observed_dirichlet).mean(axis=0)
         alpha_sum_approx = calc_approx_alpha_sum(observed_dirichlet)
         alpha_0 = observed_dirichlet.mean(axis=0) * alpha_sum_approx
         mle_alpha_t = fixed_point_dirichlet_mle(alpha_0, log_p_hat_train)
+
         x_test_p = mdl.predict(transformer.transform_batch(x_test, [t_ind] * len(x_test)),
                                batch_size=1024)
+        x_test_p = np.clip(x_test_p, EPSILON, 1 - EPSILON)
+
         scores += dirichlet_normality_score(mle_alpha_t, x_test_p)
 
     scores /= transformer.n_transforms
     labels = y_test.flatten() == single_class_ind
+
+    if not np.all(np.isfinite(scores)):
+        print(f"WARNING: NaNs or Infs found in scores for class {single_class_ind}!")
+        finite_scores = scores[np.isfinite(scores)]
+        min_val = np.min(finite_scores) if len(finite_scores) > 0 else 0.0
+        scores[~np.isfinite(scores)] = min_val
 
     # Save results
     res_dir = os.path.join(RESULTS_DIR, dataset_name)
