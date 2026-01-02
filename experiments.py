@@ -193,9 +193,11 @@ def _raw_ocsvm_experiment(dataset_load_fn, dataset_name, single_class_ind):
     x_test = x_test.reshape((len(x_test), -1))
     x_train_task = x_train[y_train.flatten() == single_class_ind]
 
-    if dataset_name in ['cats-vs-dogs']:
-        subsample_inds = np.random.choice(len(x_train_task), 5000, replace=False)
+    if dataset_name in ['cats-vs-dogs', 'creditcard']:
+        n_samples = min(len(x_train_task), 10000)
+        subsample_inds = np.random.choice(len(x_train_task), n_samples, replace=False)
         x_train_task = x_train_task[subsample_inds]
+        print(f"Subsampling SVM training data to {n_samples} samples.")
 
     pg = ParameterGrid({'nu': np.linspace(0.1, 0.9, num=9),
                         'gamma': np.logspace(-7, 2, num=10, base=2)})
