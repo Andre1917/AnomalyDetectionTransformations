@@ -1,9 +1,9 @@
 import abc
 import itertools
 import numpy as np
-
 from keras.preprocessing.image import apply_affine_transform
 
+# --- Image Transformations ---
 
 class AffineTransformation(object):
     def __init__(self, flip, tx, ty, k_90_rotate):
@@ -20,9 +20,46 @@ class AffineTransformation(object):
             res_x = apply_affine_transform(res_x, tx=self.tx, ty=self.ty, channel_axis=2, fill_mode='reflect')
         if self.k_90_rotate != 0:
             res_x = np.rot90(res_x, self.k_90_rotate)
-
         return res_x
 
+# --- Tabular Transformations ---
+
+class TabularTransformation(object):
+    def __init__(self, type_id):
+        self.type_id = type_id
+
+    def __call__(self, x):
+        x_out = x.copy()
+        # 0: Identity (No change)
+        if self.type_id == 0:
+            pass
+        # 1: Add Gaussian Noise
+        elif self.type_id == 1:
+            x_out += np.random.normal(0, 0.02, size=x_out.shape)
+        # 2: Swap two random features
+        elif self.type_id == 2:
+            if len(x_out) > 1:
+                idx1, idx2 = np.random.choice(len(x_out), 2, replace=False)
+                x_out[idx1], x_out[idx2] = x_out[idx2], x_out[idx1]
+        # 3: Mask a random feature (set to 0)
+        elif self.type_id == 3:
+            idx = np.random.randint(len(x_out))
+            x_out[idx] = 0.0
+        # 4: Random scaling
+        elif self.type_id == 4:
+            x_out *= np.random.uniform(0.5, 1.5)
+        # 5: Negation
+        elif self.type_id == 5:
+            x_out = -x_out
+        # 6: Constant shift
+        elif self.type_id == 6:
+            x_out += np.random.normal(0, 0.1)
+        # 7: Shuffle all features
+        elif self.type_id == 7:
+            np.random.shuffle(x_out)
+        return x_out
+
+# --- Base Transformer Class ---
 
 class AbstractTransformer(abc.ABC):
     def __init__(self):
@@ -35,18 +72,19 @@ class AbstractTransformer(abc.ABC):
 
     @abc.abstractmethod
     def _create_transformation_list(self):
-        return
+        pass
 
     def transform_batch(self, x_batch, t_inds):
         assert len(x_batch) == len(t_inds)
-
         transformed_batch = x_batch.copy()
         for i, t_ind in enumerate(t_inds):
             transformed_batch[i] = self._transformation_list[t_ind](transformed_batch[i])
         return transformed_batch
 
+# --- Implementation Classes ---
 
 class Transformer(AbstractTransformer):
+    """ Standard image transformer with translations and rotations """
     def __init__(self, translation_x=8, translation_y=8):
         self.max_tx = translation_x
         self.max_ty = translation_y
@@ -60,71 +98,23 @@ class Transformer(AbstractTransformer):
                                                            range(4)):
             transformation = AffineTransformation(is_flip, tx, ty, k_rotate)
             transformation_list.append(transformation)
-
         self._transformation_list = transformation_list
-
 
 class SimpleTransformer(AbstractTransformer):
+    """ Image transformer using only flips and rotations """
     def _create_transformation_list(self):
         transformation_list = []
-        for is_flip, k_rotate in itertools.product((False, True),
-                                                   range(4)):
+        for is_flip, k_rotate in itertools.product((False, True), range(4)):
             transformation = AffineTransformation(is_flip, 0, 0, k_rotate)
             transformation_list.append(transformation)
-
         self._transformation_list = transformation_list
 
+class TabularTransformer(AbstractTransformer):
+    """ Transformer for tabular data using 8 types of corruptions """
+    def __init__(self, n_transforms=8):
+        self._n_transforms = n_transforms
+        super().__init__()
 
-class TabularTransformer(object):
-    def __init__(self, n_transforms=4):
-        self.n_transforms = n_transforms
-
-    def transform_batch(self, x_batch, t_inds):
-        """
-        Applies tabular corruptions.
-        Supported:
-        0: Identity, 1: Noise, 2: Swap, 3: Mask
-        4: Scale, 5: Negation, 6: Shift, 7: Shuffle
-        """
-        x_out = x_batch.copy()
-
-        for i, t_type in enumerate(t_inds):
-            # 0: Identity (Original)
-            if t_type == 0:
-                continue
-
-            # 1: Add Gaussian Noise
-            elif t_type == 1:
-                noise = np.random.normal(0, 0.02, size=x_out[i].shape)
-                x_out[i] += noise
-
-            # 2: Swap two features
-            elif t_type == 2:
-                if len(x_out[i]) > 1:
-                    idx1, idx2 = np.random.choice(len(x_out[i]), 2, replace=False)
-                    x_out[i][idx1], x_out[i][idx2] = x_out[i][idx2], x_out[i][idx1]
-
-            # 3: Mask (set feature to 0)
-            elif t_type == 3:
-                idx = np.random.randint(len(x_out[i]))
-                x_out[i][idx] = 0.0
-
-            # 4: Scale
-            elif t_type == 4:
-                scale = np.random.uniform(0.5, 1.5)
-                x_out[i] *= scale
-
-            # 5: Negation
-            elif t_type == 5:
-                x_out[i] = -x_out[i]
-
-            # 6: Shift
-            elif t_type == 6:
-                shift = np.random.normal(0, 0.1)
-                x_out[i] += shift
-
-            # 7: Shuffle
-            elif t_type == 7:
-                np.random.shuffle(x_out[i])
-
-        return x_out
+    def _create_transformation_list(self):
+        # Create a list of transformation objects based on the requested count
+        self._transformation_list = [TabularTransformation(i) for i in range(self._n_transforms)]

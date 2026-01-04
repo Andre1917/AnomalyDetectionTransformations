@@ -2,10 +2,10 @@ from glob import glob
 import os
 import numpy as np
 import cv2
-import pandas as pd  # NEU: Für CSV-Dateien
+import pandas as pd
 from sklearn.metrics import roc_curve, precision_recall_curve, auc
-from sklearn.model_selection import train_test_split  # NEU: Für Split
-from sklearn.preprocessing import StandardScaler  # NEU: Für Skalierung
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from keras.datasets import mnist, fashion_mnist, cifar100, cifar10
 from keras.backend import cast_to_floatx
 
@@ -77,30 +77,75 @@ def load_cifar100(label_mode='coarse'):
 def load_creditcard():
     filepath = 'data/creditcard.csv'
     print(f"Loading and processing {filepath}...")
-
-    # 1. Load CSV
     df = pd.read_csv(filepath)
 
-    # 2. Cyclic Time Encoding
-    # 24 * 60 * 60 = 86400 seconds in a day
+    # Cyclic Time Encoding
     seconds_in_day = 24 * 60 * 60
     df['Time_Day'] = df['Time'] % seconds_in_day
-
-    # Sinus/Cosinus Transformation
     df['time_vector_x'] = np.sin(2 * np.pi * df['Time_Day'] / seconds_in_day)
     df['time_vector_y'] = np.cos(2 * np.pi * df['Time_Day'] / seconds_in_day)
-
-    # Delete old time columns
     df = df.drop(['Time', 'Time_Day'], axis=1)
 
+    # Scale Amount
     df['Amount'] = np.log1p(df['Amount'])
     df['Amount'] = StandardScaler().fit_transform(df['Amount'].values.reshape(-1, 1))
 
-    # 4. Split Features and Labels
     y = df['Class'].values
     x = df.drop(['Class'], axis=1).values
 
-    # 5. Split Train/Test (80/20)
+    x_train, x_test, y_train, y_test = train_test_split(
+        x, y, test_size=0.2, random_state=42, stratify=y
+    )
+    y_train = y_train.reshape(-1, 1)
+    y_test = y_test.reshape(-1, 1)
+
+    print(f"Data ready. Input shape: {x_train.shape}")
+    return (x_train, y_train), (x_test, y_test)
+
+
+def load_ieee_fraud():
+    transaction_path = 'data/train_transaction.csv'
+    identity_path = 'data/train_identity.csv'
+
+    print(f"Loading IEEE-CIS Dataset...")
+    df_trans = pd.read_csv(transaction_path)
+    df_id = pd.read_csv(identity_path)
+    # Merge both files
+    df = pd.merge(df_trans, df_id, on='TransactionID', how='left')
+
+    target_col = 'isFraud'
+
+    # 1. Time Handling
+    if 'TransactionDT' in df.columns:
+        seconds_in_day = 24 * 60 * 60
+        df['Time_Day'] = df['TransactionDT'] % seconds_in_day
+        df['time_vector_x'] = np.sin(2 * np.pi * df['Time_Day'] / seconds_in_day)
+        df['time_vector_y'] = np.cos(2 * np.pi * df['Time_Day'] / seconds_in_day)
+        df = df.drop(['TransactionDT', 'Time_Day'], axis=1)
+
+    # 2. String/Object Handling (Label Encoding)
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = pd.factorize(df[col])[0]
+
+    # 3. NaN Handling
+    df = df.fillna(-999)
+
+    # 4. Amount Scaling
+    if 'TransactionAmt' in df.columns:
+        df['TransactionAmt'] = np.log1p(df['TransactionAmt'])
+
+    # 5. Split Features / Labels
+    y = df[target_col].values
+    cols_to_drop = [target_col]
+    if 'TransactionID' in df.columns:
+        cols_to_drop.append('TransactionID')
+    x = df.drop(cols_to_drop, axis=1).values
+
+    # 6. Final Scaling
+    x = StandardScaler().fit_transform(x)
+
+    # 7. Train/Test Split
     x_train, x_test, y_train, y_test = train_test_split(
         x, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -108,8 +153,9 @@ def load_creditcard():
     y_train = y_train.reshape(-1, 1)
     y_test = y_test.reshape(-1, 1)
 
-    print(f"Data ready. Input shape: {x_train.shape}")
+    print(f"IEEE-CIS Data ready. Train shape: {x_train.shape}")
     return (x_train, y_train), (x_test, y_test)
+
 
 def save_roc_pr_curve_data(scores, labels, file_path):
     scores = scores.flatten()
@@ -123,11 +169,9 @@ def save_roc_pr_curve_data(scores, labels, file_path):
     fpr, tpr, roc_thresholds = roc_curve(truth, preds)
     roc_auc = auc(fpr, tpr)
 
-    # pr curve where "normal" is the positive class
     precision_norm, recall_norm, pr_thresholds_norm = precision_recall_curve(truth, preds)
     pr_auc_norm = auc(recall_norm, precision_norm)
 
-    # pr curve where "anomaly" is the positive class
     precision_anom, recall_anom, pr_thresholds_anom = precision_recall_curve(truth, -preds, pos_label=0)
     pr_auc_anom = auc(recall_anom, precision_anom)
 
@@ -182,7 +226,8 @@ def get_class_name_from_index(index, dataset_name):
         'fashion-mnist': ('t-shirt', 'trouser', 'pullover', 'dress', 'coat', 'sandal', 'shirt', 'sneaker', 'bag',
                           'ankle-boot'),
         'cats-vs-dogs': ('cat', 'dog'),
-        'creditcard': ('Normal', 'Fraud')
+        'creditcard': ('Normal', 'Fraud'),
+        'ieee-fraud': ('Normal', 'Fraud')
     }
 
     return ind_to_name[dataset_name][index]
