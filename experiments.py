@@ -1,3 +1,4 @@
+import os
 import csv
 from collections import defaultdict
 from glob import glob
@@ -29,22 +30,19 @@ RESULTS_DIR = 'results'
 
 
 # --- 1. OUR METHOD (GeoTrans / TabTrans) ---
-def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind, gpu_q):
-    gpu_to_use = gpu_q.get()
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_to_use
+def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind, gpu_q=None):
+    # gpu_q wird ignoriert, wir nutzen einfach die verfügbare GPU
+    print(f"[{datetime.now()}] --- Starting Transformations Experiment for Class {single_class_ind} ---")
 
     (x_train, y_train), (x_test, y_test) = dataset_load_fn()
 
-    # Check for tabular data (Credit Card or IEEE)
     is_tabular = dataset_name in ['creditcard', 'ieee-fraud']
 
     if is_tabular:
-        # Use TabularTransformer and MLP for financial data
-        # Use 8 transforms for harder task
+        # WICHTIG: 8 Transformationen für IEEE
         transformer = TabularTransformer(n_transforms=8)
         mdl = create_mlp(input_dim=x_train.shape[1], n_classes=transformer.n_transforms)
     else:
-        # Use Image Transformer and Wide ResNet for images
         if dataset_name in ['cats-vs-dogs']:
             transformer = Transformer(16, 16)
             n, k = (16, 8)
@@ -58,14 +56,18 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
     # Train only on normal class
     x_train_task = x_train[y_train.flatten() == single_class_ind]
     transformations_inds = np.tile(np.arange(transformer.n_transforms), len(x_train_task))
+
+    print(f"[{datetime.now()}] Creating transformed batch...")
     x_train_task_transformed = transformer.transform_batch(np.repeat(x_train_task, transformer.n_transforms, axis=0),
                                                            transformations_inds)
     batch_size = 128
 
+    print(f"[{datetime.now()}] Starting Training (fit)...")
+    # FIX: Wir setzen Epochen hart auf 5, damit es heute noch fertig wird!
     mdl.fit(x=x_train_task_transformed, y=to_categorical(transformations_inds),
-            batch_size=batch_size, epochs=int(np.ceil(200 / transformer.n_transforms)))
+            batch_size=batch_size, epochs=5)
 
-    # --- Normality Scoring Logic (Dirichlet) ---
+    # --- Normality Scoring Logic (mit NaN-Schutz) ---
     EPSILON = 1e-15
 
     def calc_approx_alpha_sum(observations):
@@ -96,10 +98,12 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
         p_safe = np.clip(p, EPSILON, 1 - EPSILON)
         return np.sum((alpha - 1) * np.log(p_safe), axis=-1)
 
+    print(f"[{datetime.now()}] Calculating Scores...")
     scores = np.zeros((len(x_test),))
     observed_data = x_train_task
-    # Iterate through transforms
+
     for t_ind in range(transformer.n_transforms):
+        print(f" - Transform {t_ind + 1}/{transformer.n_transforms}")
         observed_dirichlet = mdl.predict(transformer.transform_batch(observed_data, [t_ind] * len(observed_data)),
                                          batch_size=1024)
         observed_dirichlet = np.clip(observed_dirichlet, EPSILON, 1 - EPSILON)
@@ -118,9 +122,8 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
     scores /= transformer.n_transforms
     labels = y_test.flatten() == single_class_ind
 
-    # NaN Safety Check
     if not np.all(np.isfinite(scores)):
-        print(f"WARNING: NaNs or Infs found in scores for class {single_class_ind}! Cleaning up.")
+        print(f"WARNING: NaNs found. Fixing...")
         finite_scores = scores[np.isfinite(scores)]
         min_val = np.min(finite_scores) if len(finite_scores) > 0 else 0.0
         scores[~np.isfinite(scores)] = min_val
@@ -134,7 +137,7 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
                                                           datetime.now().strftime('%Y-%m-%d-%H%M'))
     save_roc_pr_curve_data(scores, labels, os.path.join(res_dir, res_file_name))
     mdl.save_weights(os.path.join(res_dir, res_file_name.replace('.npz', '_weights.h5')))
-    gpu_q.put(gpu_to_use)
+    print(f"[{datetime.now()}] Saved result: {res_file_name}")
 
 
 # --- 2. BENCHMARK: Isolation Forest ---
@@ -263,34 +266,18 @@ def _adgan_experiment(dataset_load_fn, dataset_name, single_class_ind, gpu_q):
 
 # --- MAIN RUNNER ---
 def run_experiments(load_dataset_fn, dataset_name, q, n_classes):
-    # --- Universal Benchmarks ---
-
-    # 1. Raw OC-SVM
-    for c in range(n_classes):
-        _raw_ocsvm_experiment(load_dataset_fn, dataset_name, c)
-
-    # 2. Isolation Forest
-    for c in range(n_classes):
-        _isolation_forest_experiment(load_dataset_fn, dataset_name, c)
-
-    # 3. Autoencoder (Tabular)
-    if dataset_name in ['creditcard', 'ieee-fraud']:
-        processes = [Process(target=_tabular_autoencoder_experiment,
-                             args=(load_dataset_fn, dataset_name, c, q)) for c in range(n_classes)]
-        for p in processes:
-            p.start()
-            p.join()
+    # Benchmarks (SVM, IF, AE) sind schon fertig -> Auskommentiert!
+    # for c in range(n_classes):
+    #     _raw_ocsvm_experiment(load_dataset_fn, dataset_name, c)
+    #     _isolation_forest_experiment(load_dataset_fn, dataset_name, c)
 
     # --- OUR METHOD (GeoTrans / TabTrans) ---
-    n_runs = 5
-    for _ in range(n_runs):
-        processes = [Process(target=_transformations_experiment,
-                             args=(load_dataset_fn, dataset_name, c, q)) for c in range(n_classes)]
-        if dataset_name in ['cats-vs-dogs']:
-            for p in processes: p.start(); p.join()
-        else:
-            for p in processes: p.start()
-            for p in processes: p.join()
+    # WICHTIG: Kein Multiprocessing mehr ("Process"), sondern direkter Aufruf!
+    n_runs = 1  # Nur 1 Run reicht für den Anfang
+    for i in range(n_runs):
+        print(f"--- RUN {i + 1}/{n_runs} ---")
+        for c in range(n_classes):
+            _transformations_experiment(load_dataset_fn, dataset_name, c, q)
 
 
 def create_auc_table(metric='roc_auc'):
@@ -299,7 +286,12 @@ def create_auc_table(metric='roc_auc'):
     methods = set()
     for p in file_path:
         _, f_name = os.path.split(p)
-        dataset_name, method, single_class_name = f_name.split(sep='_')[:3]
+        parts = f_name.split(sep='_')
+        # Robustere Namenserkennung (falls Zeitstempel Unterstriche hat)
+        dataset_name = parts[0]
+        method = parts[1]
+        single_class_name = parts[2]
+
         methods.add(method)
         npz = np.load(p)
         roc_auc = npz[metric]
@@ -326,16 +318,15 @@ def create_auc_table(metric='roc_auc'):
 
 
 if __name__ == '__main__':
+    # Manager/Queue lassen wir drin stehen, damit wir oben nichts ändern müssen,
+    # aber wir nutzen es faktisch nicht mehr für Prozesse.
     freeze_support()
-    N_GPUS = 1
     man = Manager()
-    q = man.Queue(N_GPUS)
-    for g in range(N_GPUS):
-        q.put(str(g))
+    q = man.Queue(1)
+    q.put("0")
 
     experiments_list = [
-        # (load_creditcard, 'creditcard', 2),
-        (load_ieee_fraud, 'ieee-fraud', 2), # NEW EXPERIMENT
+        (load_ieee_fraud, 'ieee-fraud', 2),
     ]
 
     for data_load_fn, dataset_name, n_classes in experiments_list:
