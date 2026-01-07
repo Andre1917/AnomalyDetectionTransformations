@@ -33,9 +33,9 @@ class TabularTransformation(object):
         # 0: Identity (No change)
         if self.type_id == 0:
             pass
-        # 1: Add Gaussian Noise
+        # 1: Add Gaussian Noise (SANFTER: 0.02 -> 0.005)
         elif self.type_id == 1:
-            x_out += np.random.normal(0, 0.02, size=x_out.shape)
+            x_out += np.random.normal(0, 0.005, size=x_out.shape)
         # 2: Swap two random features
         elif self.type_id == 2:
             if len(x_out) > 1:
@@ -45,15 +45,15 @@ class TabularTransformation(object):
         elif self.type_id == 3:
             idx = np.random.randint(len(x_out))
             x_out[idx] = 0.0
-        # 4: Random scaling
+        # 4: Random scaling (SANFTER: 0.5-1.5 -> 0.9-1.1)
         elif self.type_id == 4:
-            x_out *= np.random.uniform(0.5, 1.5)
+            x_out *= np.random.uniform(0.9, 1.1)
         # 5: Negation
         elif self.type_id == 5:
             x_out = -x_out
-        # 6: Constant shift
+        # 6: Constant shift (KLEINER: 0.1 -> 0.05)
         elif self.type_id == 6:
-            x_out += np.random.normal(0, 0.1)
+            x_out += np.random.normal(0, 0.05)
         # 7: Shuffle all features
         elif self.type_id == 7:
             np.random.shuffle(x_out)
