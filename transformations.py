@@ -118,3 +118,37 @@ class TabularTransformer(AbstractTransformer):
     def _create_transformation_list(self):
         # Create a list of transformation objects based on the requested count
         self._transformation_list = [TabularTransformation(i) for i in range(self._n_transforms)]
+
+
+class TabularTransformerIEEE(object):
+    """
+    Spezielle aggressive Transformationen für den IEEE-Datensatz.
+    Unterschied zum Standard: Stärkeres Rauschen, Skalierung und Shift.
+    """
+    def __init__(self, n_transforms=8):
+        self.n_transforms = n_transforms
+
+    def transform_batch(self, x, t_inds):
+        x_out = x.copy()
+        # Wir iterieren durch den Batch, da jede Zeile eine andere Transform haben kann
+        for i, t_idx in enumerate(t_inds):
+            if t_idx == 0: # Identity
+                continue
+            elif t_idx == 1: # Aggressive Noise (0.02 vs 0.005)
+                x_out[i] += np.random.normal(0, 0.02, size=x_out[i].shape)
+            elif t_idx == 2: # Swap
+                if len(x_out[i]) > 1:
+                    idx1, idx2 = np.random.choice(len(x_out[i]), 2, replace=False)
+                    x_out[i][idx1], x_out[i][idx2] = x_out[i][idx2], x_out[i][idx1]
+            elif t_idx == 3: # Mask
+                idx = np.random.randint(len(x_out[i]))
+                x_out[i][idx] = 0.0
+            elif t_idx == 4: # Aggressive Scaling (0.5-1.5 vs 0.9-1.1)
+                x_out[i] *= np.random.uniform(0.5, 1.5)
+            elif t_idx == 5: # Negation
+                x_out[i] = -x_out[i]
+            elif t_idx == 6: # Aggressive Shift (0.1 vs 0.05)
+                x_out[i] += np.random.normal(0, 0.1)
+            elif t_idx == 7: # Shuffle
+                np.random.shuffle(x_out[i])
+        return x_out

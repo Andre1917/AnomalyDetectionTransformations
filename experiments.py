@@ -21,11 +21,12 @@ import keras.backend as K
 # --- Custom Modules ---
 from utils import load_cifar10, load_cats_vs_dogs, load_fashion_mnist, load_cifar100, load_creditcard, load_ieee_fraud
 from utils import save_roc_pr_curve_data, get_class_name_from_index
-from transformations import Transformer, TabularTransformer
+from transformations import Transformer, TabularTransformer, TabularTransformerIEEE
 
 # Modelle
 from models.wide_residual_network import create_wide_residual_network
 from models.tabular_resnet import create_robust_resnet
+from models.mlp import create_mlp
 from models import dsebm, dagmm, adgan
 
 RESULTS_DIR = 'results'
@@ -160,6 +161,95 @@ def _transformations_experiment(dataset_load_fn, dataset_name, single_class_ind,
     mdl.save_weights(os.path.join(res_dir, res_file_name.replace('.npz', '_weights.h5')))
     print(f"[{datetime.now()}] Saved result: {res_file_name}")
 
+# 1b. IEEE Spezieller Transformations-Experiment (Aggressiver)
+def _transformations_experimentIEEE(dataset_load_fn, dataset_name, single_class_ind, gpu_q=None):
+    print(f"[{datetime.now()}] --- Starting IEEE SPECIAL Transformations (Aggressive) for Class {single_class_ind} ---")
+
+    (x_train, y_train), (x_test, y_test) = dataset_load_fn()
+
+    # HIER IST DER UNTERSCHIED:
+    transformer = TabularTransformerIEEE(n_transforms=8)  # Aggressiver Transformer
+
+    mdl = create_mlp(input_dim=x_train.shape[1], n_classes=transformer.n_transforms)  # Einfaches Modell
+
+    mdl.compile('adam', 'categorical_crossentropy', ['acc'])
+    x_train_task = x_train[y_train.flatten() == single_class_ind]
+
+    # Exakt gleicher Generator & Scoring Code wie oben, nur nutzt er "transformer" (welcher jetzt der IEEE ist)
+    def batch_generator(x_data, batch_size, n_transforms):
+        n_samples = len(x_data)
+        indices = np.arange(n_samples)
+        while True:
+            np.random.shuffle(indices)
+            for start_idx in range(0, n_samples, batch_size):
+                batch_indices = indices[start_idx: start_idx + batch_size]
+                x_batch = x_data[batch_indices]
+                x_batch_repeated = np.repeat(x_batch, n_transforms, axis=0)
+                t_inds = np.tile(np.arange(n_transforms), len(x_batch))
+                x_batch_transformed = transformer.transform_batch(x_batch_repeated, t_inds)
+                yield x_batch_transformed, to_categorical(t_inds, num_classes=n_transforms)
+
+    mdl.fit_generator(generator=batch_generator(x_train_task, 64, transformer.n_transforms),
+                      steps_per_epoch=len(x_train_task) // 64, epochs=20, verbose=1)
+
+    # --- Scoring Logic (Copy & Paste vom Standard) ---
+    EPSILON = 1e-15
+
+    def calc_approx_alpha_sum(observations):
+        N = len(observations)
+        f = np.mean(observations, axis=0)
+        f = np.clip(f, EPSILON, 1 - EPSILON)
+        obs_safe = np.clip(observations, EPSILON, 1 - EPSILON)
+        return (N * (len(f) - 1) * (-psi(1))) / (
+                    N * np.sum(f * np.log(f)) - np.sum(f * np.sum(np.log(obs_safe), axis=0)))
+
+    def inv_psi(y, iters=5):
+        cond = y >= -2.22
+        x = cond * (np.exp(y) + 0.5) + (1 - cond) * -1 / (y - psi(1))
+        for _ in range(iters): x = x - (psi(x) - y) / polygamma(1, x)
+        return x
+
+    def fixed_point_dirichlet_mle(alpha_init, log_p_hat, max_iter=1000):
+        alpha_new = alpha_old = alpha_init
+        for _ in range(max_iter):
+            alpha_new = inv_psi(psi(np.sum(alpha_old)) + log_p_hat)
+            if np.sqrt(np.sum((alpha_old - alpha_new) ** 2)) < 1e-9: break
+            alpha_old = alpha_new
+        return alpha_new
+
+    def dirichlet_normality_score(alpha, p):
+        return np.sum((alpha - 1) * np.log(np.clip(p, EPSILON, 1 - EPSILON)), axis=-1)
+
+    print(f"[{datetime.now()}] Calculating Scores (IEEE Special)...")
+    scores = np.zeros((len(x_test),))
+    eval_batch_size = 512
+
+    for t_ind in range(transformer.n_transforms):
+        print(f" - Transform {t_ind + 1}/{transformer.n_transforms}")
+        obs_dir = mdl.predict(transformer.transform_batch(x_train_task, [t_ind] * len(x_train_task)),
+                              batch_size=eval_batch_size)
+        obs_dir = np.clip(obs_dir, EPSILON, 1 - EPSILON)
+        alpha_0 = obs_dir.mean(axis=0) * calc_approx_alpha_sum(obs_dir)
+        mle_alpha_t = fixed_point_dirichlet_mle(alpha_0, np.log(obs_dir).mean(axis=0))
+        test_p = mdl.predict(transformer.transform_batch(x_test, [t_ind] * len(x_test)), batch_size=eval_batch_size)
+        scores += dirichlet_normality_score(mle_alpha_t, np.clip(test_p, EPSILON, 1 - EPSILON))
+
+    scores /= transformer.n_transforms
+    labels = y_test.flatten() == single_class_ind
+
+    if not np.all(np.isfinite(scores)): scores[~np.isfinite(scores)] = np.min(scores[np.isfinite(scores)]) if np.any(
+        np.isfinite(scores)) else 0.0
+
+    # Speichern mit speziellem Namen, damit man es in der Tabelle erkennt
+    res_dir = os.path.join(RESULTS_DIR, dataset_name)
+    if not os.path.exists(res_dir): os.makedirs(res_dir)
+    # HIER: Name ändern auf 'transformationsIEEE'
+    res_file_name = '{}_transformationsIEEE_{}_{}.npz'.format(dataset_name,
+                                                              get_class_name_from_index(single_class_ind, dataset_name),
+                                                              datetime.now().strftime('%Y-%m-%d-%H%M'))
+    save_roc_pr_curve_data(scores, labels, os.path.join(res_dir, res_file_name))
+    mdl.save_weights(os.path.join(res_dir, res_file_name.replace('.npz', '_weights.h5')))
+    print(f"[{datetime.now()}] Saved IEEE Special result: {res_file_name}")
 
 # --- 2. BENCHMARK: Isolation Forest ---
 def _train_if_and_score(params, xtrain, test_labels, xtest):
@@ -302,9 +392,13 @@ def run_experiments(load_dataset_fn, dataset_name, q, n_classes):
     # 2. OUR METHOD (Transformations) - Jetzt 5 Runs!
     n_runs = 5
     for i in range(n_runs):
-        print(f"--- TRANSFORMATIONS RUN {i + 1}/{n_runs} ---")
         for c in range(n_classes):
-            _transformations_experiment(load_dataset_fn, dataset_name, c, q)
+            if dataset_name == 'ieee-fraud':
+                # Nutze die SPEZIAL-Funktion für IEEE
+                _transformations_experimentIEEE(load_dataset_fn, dataset_name, c, q)
+            else:
+                # Nutze die STANDARD-Funktion für alles andere (Creditcard etc.)
+                _transformations_experiment(load_dataset_fn, dataset_name, c, q)
 
 
 def create_auc_table(metric='roc_auc'):
