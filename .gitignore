@@ -1,0 +1,122 @@
+############################
+# OS / Editor / IDE junk
+############################
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# JetBrains (PyCharm, IntelliJ, etc.)
+.idea/
+
+# VSCode
+.vscode/
+
+# Vim
+*.swp
+*.swo
+
+############################
+# Python
+############################
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables
+.env
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.installed.cfg
+.pytest_cache/
+
+# Coverage / testing
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+
+############################
+# Jupyter
+############################
+
+.ipynb_checkpoints/
+
+############################
+# Logs / temp files
+############################
+
+*.log
+*.tmp
+*.bak
+*.old
+*.orig
+
+############################
+# ML / Data Science artifacts
+############################
+
+# Model files
+*.h5
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Numpy / results
+*.npz
+*.npy
+
+# Large outputs
+results/
+logs/
+runs/
+wandb/
+
+############################
+# Data folders (keep structure, ignore content)
+############################
+
+data/*
+!data/.gitkeep
+
+############################
+# Archives
+############################
+
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+############################
+# Docker
+############################
+
+docker-compose.override.yml
+
+############################
+# Misc
+############################
+
+*.csv
+Report/
